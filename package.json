@@ -1,0 +1,35 @@
+{
+  "name": "@pineapple/auth-utils",
+  "version": "1.0.0",
+  "description": "Pineapple authentication utilities for microservices",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "prepublish": "npm run build"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "dependencies": {
+    "@aws-sdk/client-sts": "^3.864.0",
+    "aws4": "^1.12.0",
+    "axios": "^1.13.6",
+    "crypto-js": "^4.2.0",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "redis": "^4.6.13"
+  },
+  "devDependencies": {
+    "@types/aws4": "^1.11.6",
+    "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^22.15.14",
+    "jest": "^30.0.5",
+    "typescript": "^5.9.2"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}
