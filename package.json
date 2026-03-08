@@ -1,5 +1,5 @@
 {
-  "name": "@ThePineappleTech/auth-utils",
+  "name": "@ThePineappleTech/pineapple-auth-utils",
   "version": "1.0.0",
   "description": "Pineapple authentication utilities for microservices",
   "main": "dist/index.js",
