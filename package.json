@@ -30,6 +30,6 @@
     "typescript": "^5.9.2"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "@pineapple:registry": "https://npm.pkg.github.com"
   }
 }
