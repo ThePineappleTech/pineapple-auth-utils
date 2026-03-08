@@ -1,5 +1,5 @@
 {
-  "name": "@pineapple/auth-utils",
+  "name": "@ThePineappleTech/auth-utils",
   "version": "1.0.0",
   "description": "Pineapple authentication utilities for microservices",
   "main": "dist/index.js",
@@ -30,6 +30,6 @@
     "typescript": "^5.9.2"
   },
   "publishConfig": {
-    "@pineapple:registry": "https://npm.pkg.github.com"
+    "@ThePineappleTech:registry": "https://npm.pkg.github.com"
   }
 }
