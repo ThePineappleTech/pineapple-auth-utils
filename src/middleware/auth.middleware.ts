@@ -99,7 +99,7 @@ export class PineappleAuth {
         console.log(`[JWT-AUTH-${requestId}] 👤 User: ${decoded.email} (ID: ${decoded.userId})`);
         console.log(`[JWT-AUTH-${requestId}] 🎭 Role: ${decoded.role || 'none'}`);
         console.log(`[JWT-AUTH-${requestId}] 🎯 Token ID: ${decoded.jti}`);
-        console.log(`[JWT-AUTH-${requestId}] ⏰ Expires: ${new Date(decoded.exp * 1000).toISOString()}`);
+        console.log(`[JWT-AUTH-${requestId}] ⏰ Expires: ${decoded.exp ? new Date(decoded.exp * 1000).toISOString() : 'never'}`);
 
         // Check if token is revoked (if Redis is available)
         if (this.redisClient) {
