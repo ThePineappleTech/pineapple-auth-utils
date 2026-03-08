@@ -3,8 +3,10 @@ import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
 import aws4 from 'aws4'
 import * as Redis from 'redis'
+import type { AuthConfig, RedisConfig } from '../index'
+import { validateRedisConfig } from '../utils/config-helpers'
 
-interface AuthConfig {
+interface LegacyAuthConfig {
   jwt: {
     secret: string
     issuer: string
@@ -37,21 +39,28 @@ declare global {
 
 export class PineappleAuth {
   private redisClient?: Redis.RedisClientType
+  private config: AuthConfig | LegacyAuthConfig
   
-  constructor(private config: AuthConfig) {
+  constructor(config: AuthConfig | LegacyAuthConfig) {
+    this.config = config
     console.log('🍍 [PINEAPPLE-AUTH] Initializing authentication middleware');
     console.log('🍍 [PINEAPPLE-AUTH] JWT Issuer:', config.jwt.issuer);
     console.log('🍍 [PINEAPPLE-AUTH] JWT Secret configured:', config.jwt.secret ? 'YES' : 'NO');
     console.log('🍍 [PINEAPPLE-AUTH] Redis configured:', config.redis ? 'YES' : 'NO');
     
     if (config.redis) {
-      console.log('🍍 [PINEAPPLE-AUTH] Connecting to Redis:', config.redis.url);
-      this.redisClient = Redis.createClient({ url: config.redis.url })
-      this.redisClient.connect()
-        .then(() => console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis connected successfully'))
-        .catch((error) => {
-          console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis connection failed:', error);
-        })
+      try {
+        const redisOptions = this.getRedisOptions(config.redis)
+        console.log('🍍 [PINEAPPLE-AUTH] Connecting to Redis:', this.maskCredentials(redisOptions.url || redisOptions.socket?.host || 'unknown'));
+        this.redisClient = Redis.createClient(redisOptions)
+        this.redisClient.connect()
+          .then(() => console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis connected successfully'))
+          .catch((error) => {
+            console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis connection failed:', error);
+          })
+      } catch (error) {
+        console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis configuration error:', (error as Error).message);
+      }
     }
     
     console.log('🍍 [PINEAPPLE-AUTH] ✅ Authentication middleware initialized');
@@ -290,9 +299,99 @@ export class PineappleAuth {
     const credentialMatch = authHeader.match(/Credential=([^\/]+)\//)
     return credentialMatch ? credentialMatch[1] : null
   }
+
+  private getRedisUrl(redisConfig: RedisConfig | { url: string }): string {
+    // Handle legacy format
+    if ('url' in redisConfig && typeof redisConfig.url === 'string') {
+      return redisConfig.url
+    }
+    
+    // Handle new flexible format
+    return validateRedisConfig(redisConfig as RedisConfig)
+  }
+
+  private getRedisOptions(redisConfig: RedisConfig | { url: string }): any {
+    // Handle legacy format
+    if ('url' in redisConfig && typeof redisConfig.url === 'string' && Object.keys(redisConfig).length === 1) {
+      return { url: redisConfig.url }
+    }
+
+    const config = redisConfig as RedisConfig
+    
+    // If URL is provided with additional options, use URL but apply extra options
+    if (config.url) {
+      const options: any = { url: config.url }
+      
+      // Add TLS options if specified
+      if (config.tls) {
+        if (typeof config.tls === 'boolean' && config.tls) {
+          options.socket = { tls: true }
+        } else if (typeof config.tls === 'object') {
+          options.socket = { 
+            tls: true,
+            servername: config.tls.servername,
+            rejectUnauthorized: config.tls.rejectUnauthorized
+          }
+        }
+      }
+
+      // Add timeout options
+      if (config.connectTimeout) options.socket = { ...options.socket, connectTimeout: config.connectTimeout }
+      if (config.commandTimeout) options.commandTimeout = config.commandTimeout
+      
+      // Add retry options  
+      if (config.retryDelayOnFailover) options.retryDelayOnFailover = config.retryDelayOnFailover
+      if (config.enableOfflineQueue !== undefined) options.enableOfflineQueue = config.enableOfflineQueue
+      if (config.maxRetriesPerRequest) options.maxRetriesPerRequest = config.maxRetriesPerRequest
+      if (config.retryConnect) options.retryConnect = config.retryConnect
+
+      return options
+    }
+
+    // Build from individual components
+    const options: any = {
+      socket: {
+        host: config.host || 'localhost',
+        port: config.port || 6379
+      }
+    }
+
+    if (config.password) options.password = config.password
+    if (config.username) options.username = config.username
+    if (config.db) options.database = config.db
+    if (config.family) options.socket.family = config.family
+
+    // TLS configuration
+    if (config.tls) {
+      if (typeof config.tls === 'boolean' && config.tls) {
+        options.socket.tls = true
+      } else if (typeof config.tls === 'object') {
+        options.socket.tls = true
+        if (config.tls.servername) options.socket.servername = config.tls.servername
+        if (config.tls.rejectUnauthorized !== undefined) options.socket.rejectUnauthorized = config.tls.rejectUnauthorized
+      }
+    }
+
+    // Timeout options
+    if (config.connectTimeout) options.socket.connectTimeout = config.connectTimeout
+    if (config.commandTimeout) options.commandTimeout = config.commandTimeout
+    
+    // Retry options
+    if (config.retryDelayOnFailover) options.retryDelayOnFailover = config.retryDelayOnFailover
+    if (config.enableOfflineQueue !== undefined) options.enableOfflineQueue = config.enableOfflineQueue  
+    if (config.maxRetriesPerRequest) options.maxRetriesPerRequest = config.maxRetriesPerRequest
+    if (config.retryConnect) options.retryConnect = config.retryConnect
+
+    return options
+  }
+
+  private maskCredentials(url: string): string {
+    // Mask credentials in logs for security
+    return url.replace(/:\/\/[^@]*@/, '://***:***@')
+  }
 }
 
 // Export factory function for easy setup
-export function createAuthMiddleware(config: AuthConfig): PineappleAuth {
+export function createAuthMiddleware(config: AuthConfig | LegacyAuthConfig): PineappleAuth {
   return new PineappleAuth(config)
 }
