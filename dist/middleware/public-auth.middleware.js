@@ -49,7 +49,7 @@ class PublicAuthMiddleware {
                     console.log(`[PUBLIC-AUTH-${requestId}] 👤 User: ${decoded.email} (ID: ${decoded.userId})`);
                     console.log(`[PUBLIC-AUTH-${requestId}] 🎭 Role: ${decoded.role || 'none'}`);
                     console.log(`[PUBLIC-AUTH-${requestId}] 🎯 Token ID: ${decoded.jti}`);
-                    console.log(`[PUBLIC-AUTH-${requestId}] ⏰ Expires: ${new Date(decoded.exp * 1000).toISOString()}`);
+                    console.log(`[PUBLIC-AUTH-${requestId}] ⏰ Expires: ${decoded.exp ? new Date(decoded.exp * 1000).toISOString() : 'never'}`);
                     // Check if token is revoked (if Redis is available)
                     if (this.redisClient) {
                         console.log(`[PUBLIC-AUTH-${requestId}] 🔄 Checking token revocation in Redis`);
