@@ -85,6 +85,40 @@ export declare const ConfigHelpers: {
      */
     forHeroku: () => AuthConfig;
     /**
+     * Configuration for AWS ElastiCache Cluster Mode
+     */
+    forElastiCacheCluster: (clusterEndpoint: string, options?: {
+        port?: number;
+        tls?: boolean;
+        authToken?: string;
+        region?: string;
+        connectTimeout?: number;
+        nodes?: Array<{
+            host: string;
+            port: number;
+        }>;
+    }) => AuthConfig;
+    /**
+     * Configuration for AWS ElastiCache Replication Group with multiple nodes
+     */
+    forElastiCacheReplicationGroup: (primaryEndpoint: string, readerEndpoint?: string, options?: {
+        port?: number;
+        tls?: boolean;
+        authToken?: string;
+        region?: string;
+        connectTimeout?: number;
+    }) => AuthConfig;
+    /**
+     * Auto-detect ElastiCache configuration type from endpoint
+     */
+    forElastiCacheAuto: (endpoint: string, options?: {
+        authToken?: string;
+        region?: string;
+        tls?: boolean;
+        port?: number;
+        connectTimeout?: number;
+    }) => AuthConfig;
+    /**
      * Configuration without Redis (degraded mode)
      */
     withoutRedis: () => AuthConfig;

@@ -39,6 +39,7 @@ export declare class PublicAuthMiddleware {
     validateJWT: (req: Request, res: Response, next: NextFunction) => Promise<void | Response<any, Record<string, any>>>;
     private getRedisUrl;
     private getRedisOptions;
+    private getRedisClusterOptions;
     private maskCredentials;
 }
 export declare function createPublicAuth(config: PublicAuthConfig): PublicAuthMiddleware;

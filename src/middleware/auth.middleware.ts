@@ -38,7 +38,7 @@ declare global {
 }
 
 export class PineappleAuth {
-  private redisClient?: Redis.RedisClientType
+  private redisClient?: Redis.RedisClientType | Redis.RedisClusterType
   private config: AuthConfig | LegacyAuthConfig
   
   constructor(config: AuthConfig | LegacyAuthConfig) {
@@ -50,14 +50,30 @@ export class PineappleAuth {
     
     if (config.redis) {
       try {
-        const redisOptions = this.getRedisOptions(config.redis)
-        console.log('🍍 [PINEAPPLE-AUTH] Connecting to Redis:', this.maskCredentials(redisOptions.url || redisOptions.socket?.host || 'unknown'));
-        this.redisClient = Redis.createClient(redisOptions)
-        this.redisClient.connect()
-          .then(() => console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis connected successfully'))
-          .catch((error) => {
-            console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis connection failed:', error);
-          })
+        const redisConfig = config.redis as RedisConfig
+        
+        // Check if cluster configuration is provided
+        if (redisConfig.cluster) {
+          console.log('🍍 [PINEAPPLE-AUTH] Initializing Redis Cluster connection');
+          const clusterOptions = this.getRedisClusterOptions(redisConfig)
+          console.log('🍍 [PINEAPPLE-AUTH] Connecting to Redis Cluster with', clusterOptions.rootNodes?.length || 0, 'root nodes');
+          this.redisClient = Redis.createCluster(clusterOptions)
+          this.redisClient.connect()
+            .then(() => console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis Cluster connected successfully'))
+            .catch((error) => {
+              console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis Cluster connection failed:', error);
+            })
+        } else {
+          // Standard single Redis instance
+          const redisOptions = this.getRedisOptions(config.redis)
+          console.log('🍍 [PINEAPPLE-AUTH] Connecting to Redis:', this.maskCredentials(redisOptions.url || redisOptions.socket?.host || 'unknown'));
+          this.redisClient = Redis.createClient(redisOptions)
+          this.redisClient.connect()
+            .then(() => console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis connected successfully'))
+            .catch((error) => {
+              console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis connection failed:', error);
+            })
+        }
       } catch (error) {
         console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis configuration error:', (error as Error).message);
       }
@@ -388,6 +404,68 @@ export class PineappleAuth {
     if (config.enableOfflineQueue !== undefined) options.enableOfflineQueue = config.enableOfflineQueue  
     if (config.maxRetriesPerRequest) options.maxRetriesPerRequest = config.maxRetriesPerRequest
     if (config.retryConnect) options.retryConnect = config.retryConnect
+
+    return options
+  }
+
+  private getRedisClusterOptions(redisConfig: RedisConfig): any {
+    const clusterConfig = redisConfig.cluster!
+    
+    const options: any = {
+      rootNodes: clusterConfig.rootNodes || [],
+      defaults: clusterConfig.defaults || {}
+    }
+
+    // Apply cluster-specific settings
+    if (clusterConfig.enableAutoPipelining !== undefined) {
+      options.enableAutoPipelining = clusterConfig.enableAutoPipelining
+    }
+    if (clusterConfig.useReplicas !== undefined) {
+      options.useReplicas = clusterConfig.useReplicas
+    }
+    if (clusterConfig.maxCommandRedirections) {
+      options.maxCommandRedirections = clusterConfig.maxCommandRedirections
+    }
+    if (clusterConfig.retryDelayOnClusterDown) {
+      options.retryDelayOnClusterDown = clusterConfig.retryDelayOnClusterDown
+    }
+    if (clusterConfig.retryDelayOnFailover) {
+      options.retryDelayOnFailover = clusterConfig.retryDelayOnFailover
+    }
+    if (clusterConfig.maxRetriesPerRequest) {
+      options.maxRetriesPerRequest = clusterConfig.maxRetriesPerRequest
+    }
+    if (clusterConfig.scaleReads) {
+      options.scaleReads = clusterConfig.scaleReads
+    }
+
+    // Apply global Redis settings to defaults
+    if (redisConfig.password) options.defaults.password = redisConfig.password
+    if (redisConfig.username) options.defaults.username = redisConfig.username
+    if (redisConfig.db) options.defaults.database = redisConfig.db
+    
+    // Apply TLS settings to defaults
+    if (redisConfig.tls) {
+      if (!options.defaults.socket) options.defaults.socket = {}
+      if (typeof redisConfig.tls === 'boolean' && redisConfig.tls) {
+        options.defaults.socket.tls = true
+      } else if (typeof redisConfig.tls === 'object') {
+        options.defaults.socket.tls = true
+        if (redisConfig.tls.servername) options.defaults.socket.servername = redisConfig.tls.servername
+        if (redisConfig.tls.rejectUnauthorized !== undefined) {
+          options.defaults.socket.rejectUnauthorized = redisConfig.tls.rejectUnauthorized
+        }
+      }
+    }
+
+    // Apply timeout settings to defaults
+    if (redisConfig.connectTimeout) {
+      if (!options.defaults.socket) options.defaults.socket = {}
+      options.defaults.socket.connectTimeout = redisConfig.connectTimeout
+    }
+    if (redisConfig.commandTimeout) {
+      options.defaults.commandTimeout = redisConfig.commandTimeout
+    }
 
     return options
   }

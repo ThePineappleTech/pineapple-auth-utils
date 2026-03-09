@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import jwt from 'jsonwebtoken'
-import { createClient, RedisClientType } from 'redis'
+import { createClient, createCluster, RedisClientType, RedisClusterType } from 'redis'
 import type { RedisConfig } from '../index'
 import { validateRedisConfig } from '../utils/config-helpers'
 
@@ -34,7 +34,7 @@ declare global {
  * (pineapple-api, pineapple-motor-service, pineapple-building-and-contents-service)
  */
 export class PublicAuthMiddleware {
-  private redisClient?: RedisClientType
+  private redisClient?: RedisClientType | RedisClusterType
   private config: PublicAuthConfig
   
   constructor(config: PublicAuthConfig) {
@@ -48,20 +48,44 @@ export class PublicAuthMiddleware {
     
     if (config.redis) {
       try {
-        const redisOptions = this.getRedisOptions(config.redis)
-        if (process.env.NODE_ENV !== 'production') {
-          console.log('🍍 [PUBLIC-AUTH] Connecting to Redis:', this.maskCredentials(redisOptions.url || redisOptions.socket?.host || 'unknown'));
+        const redisConfig = config.redis as RedisConfig
+        
+        // Check if cluster configuration is provided
+        if (redisConfig.cluster) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('🍍 [PUBLIC-AUTH] Initializing Redis Cluster connection');
+          }
+          const clusterOptions = this.getRedisClusterOptions(redisConfig)
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('🍍 [PUBLIC-AUTH] Connecting to Redis Cluster with', clusterOptions.rootNodes?.length || 0, 'root nodes');
+          }
+          this.redisClient = createCluster(clusterOptions)
+          this.redisClient.connect()
+            .then(() => {
+              if (process.env.NODE_ENV !== 'production') {
+                console.log('🍍 [PUBLIC-AUTH] ✅ Redis Cluster connected successfully')
+              }
+            })
+            .catch((error) => {
+              console.error('🍍 [PUBLIC-AUTH] ❌ Redis Cluster connection failed:', error);
+            })
+        } else {
+          // Standard single Redis instance
+          const redisOptions = this.getRedisOptions(config.redis)
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('🍍 [PUBLIC-AUTH] Connecting to Redis:', this.maskCredentials(redisOptions.url || redisOptions.socket?.host || 'unknown'));
+          }
+          this.redisClient = createClient(redisOptions)
+          this.redisClient.connect()
+            .then(() => {
+              if (process.env.NODE_ENV !== 'production') {
+                console.log('🍍 [PUBLIC-AUTH] ✅ Redis connected successfully')
+              }
+            })
+            .catch((error) => {
+              console.error('🍍 [PUBLIC-AUTH] ❌ Redis connection failed:', error);
+            })
         }
-        this.redisClient = createClient(redisOptions)
-        this.redisClient.connect()
-          .then(() => {
-            if (process.env.NODE_ENV !== 'production') {
-              console.log('🍍 [PUBLIC-AUTH] ✅ Redis connected successfully')
-            }
-          })
-          .catch((error) => {
-            console.error('🍍 [PUBLIC-AUTH] ❌ Redis connection failed:', error);
-          })
       } catch (error) {
         console.error('🍍 [PUBLIC-AUTH] ❌ Redis configuration error:', (error as Error).message);
       }
@@ -302,6 +326,68 @@ export class PublicAuthMiddleware {
     if (config.enableOfflineQueue !== undefined) options.enableOfflineQueue = config.enableOfflineQueue  
     if (config.maxRetriesPerRequest) options.maxRetriesPerRequest = config.maxRetriesPerRequest
     if (config.retryConnect) options.retryConnect = config.retryConnect
+
+    return options
+  }
+
+  private getRedisClusterOptions(redisConfig: RedisConfig): any {
+    const clusterConfig = redisConfig.cluster!
+    
+    const options: any = {
+      rootNodes: clusterConfig.rootNodes || [],
+      defaults: clusterConfig.defaults || {}
+    }
+
+    // Apply cluster-specific settings
+    if (clusterConfig.enableAutoPipelining !== undefined) {
+      options.enableAutoPipelining = clusterConfig.enableAutoPipelining
+    }
+    if (clusterConfig.useReplicas !== undefined) {
+      options.useReplicas = clusterConfig.useReplicas
+    }
+    if (clusterConfig.maxCommandRedirections) {
+      options.maxCommandRedirections = clusterConfig.maxCommandRedirections
+    }
+    if (clusterConfig.retryDelayOnClusterDown) {
+      options.retryDelayOnClusterDown = clusterConfig.retryDelayOnClusterDown
+    }
+    if (clusterConfig.retryDelayOnFailover) {
+      options.retryDelayOnFailover = clusterConfig.retryDelayOnFailover
+    }
+    if (clusterConfig.maxRetriesPerRequest) {
+      options.maxRetriesPerRequest = clusterConfig.maxRetriesPerRequest
+    }
+    if (clusterConfig.scaleReads) {
+      options.scaleReads = clusterConfig.scaleReads
+    }
+
+    // Apply global Redis settings to defaults
+    if (redisConfig.password) options.defaults.password = redisConfig.password
+    if (redisConfig.username) options.defaults.username = redisConfig.username
+    if (redisConfig.db) options.defaults.database = redisConfig.db
+    
+    // Apply TLS settings to defaults
+    if (redisConfig.tls) {
+      if (!options.defaults.socket) options.defaults.socket = {}
+      if (typeof redisConfig.tls === 'boolean' && redisConfig.tls) {
+        options.defaults.socket.tls = true
+      } else if (typeof redisConfig.tls === 'object') {
+        options.defaults.socket.tls = true
+        if (redisConfig.tls.servername) options.defaults.socket.servername = redisConfig.tls.servername
+        if (redisConfig.tls.rejectUnauthorized !== undefined) {
+          options.defaults.socket.rejectUnauthorized = redisConfig.tls.rejectUnauthorized
+        }
+      }
+    }
+
+    // Apply timeout settings to defaults
+    if (redisConfig.connectTimeout) {
+      if (!options.defaults.socket) options.defaults.socket = {}
+      options.defaults.socket.connectTimeout = redisConfig.connectTimeout
+    }
+    if (redisConfig.commandTimeout) {
+      options.defaults.commandTimeout = redisConfig.commandTimeout
+    }
 
     return options
   }

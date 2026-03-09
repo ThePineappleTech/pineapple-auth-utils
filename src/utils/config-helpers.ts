@@ -328,6 +328,117 @@ export const ConfigHelpers = {
   }),
 
   /**
+   * Configuration for AWS ElastiCache Cluster Mode
+   */
+  forElastiCacheCluster: (clusterEndpoint: string, options?: {
+    port?: number
+    tls?: boolean
+    authToken?: string
+    region?: string
+    connectTimeout?: number
+    nodes?: Array<{ host: string; port: number }>
+  }) => {
+    const port = options?.port || (options?.tls ? 6380 : 6379)
+    const protocol = options?.tls ? 'rediss' : 'redis'
+    
+    // ElastiCache cluster configuration endpoint format
+    const rootNodes = options?.nodes || [{ host: clusterEndpoint, port }]
+    
+    return createAuthConfig({
+      aws: { region: options?.region || 'us-east-1', service: 'pineapple' },
+      redis: {
+        cluster: {
+          rootNodes,
+          useReplicas: true,
+          enableAutoPipelining: true,
+          maxCommandRedirections: 16,
+          retryDelayOnClusterDown: 300,
+          retryDelayOnFailover: 100,
+          maxRetriesPerRequest: 3,
+          scaleReads: 'all'
+        },
+        password: options?.authToken,
+        tls: options?.tls ? {
+          servername: clusterEndpoint,
+          rejectUnauthorized: true
+        } : false,
+        connectTimeout: options?.connectTimeout || 20000,
+        commandTimeout: 5000
+      }
+    })
+  },
+
+  /**
+   * Configuration for AWS ElastiCache Replication Group with multiple nodes
+   */
+  forElastiCacheReplicationGroup: (primaryEndpoint: string, readerEndpoint?: string, options?: {
+    port?: number
+    tls?: boolean
+    authToken?: string
+    region?: string
+    connectTimeout?: number
+  }) => {
+    const port = options?.port || (options?.tls ? 6380 : 6379)
+    
+    const rootNodes = [
+      { host: primaryEndpoint, port }
+    ]
+    
+    // Add reader endpoint if provided
+    if (readerEndpoint) {
+      rootNodes.push({ host: readerEndpoint, port })
+    }
+    
+    return createAuthConfig({
+      aws: { region: options?.region || 'us-east-1', service: 'pineapple' },
+      redis: {
+        cluster: {
+          rootNodes,
+          useReplicas: true,
+          enableAutoPipelining: false, // Disable for replication groups
+          maxCommandRedirections: 6,
+          retryDelayOnClusterDown: 100,
+          retryDelayOnFailover: 100,
+          maxRetriesPerRequest: 3,
+          scaleReads: 'slave' // Prefer replicas for read operations
+        },
+        password: options?.authToken,
+        tls: options?.tls ? {
+          servername: primaryEndpoint,
+          rejectUnauthorized: true
+        } : false,
+        connectTimeout: options?.connectTimeout || 20000,
+        commandTimeout: 5000
+      }
+    })
+  },
+
+  /**
+   * Auto-detect ElastiCache configuration type from endpoint
+   */
+  forElastiCacheAuto: (endpoint: string, options?: {
+    authToken?: string
+    region?: string
+    tls?: boolean
+    port?: number
+    connectTimeout?: number
+  }) => {
+    if (endpoint.includes('clustercfg')) {
+      // This is a cluster configuration endpoint
+      console.log('🍍 [CONFIG] Detected ElastiCache Cluster Mode endpoint')
+      return ConfigHelpers.forElastiCacheCluster(endpoint, options)
+    } else if (endpoint.includes('serverless')) {
+      // This is a serverless endpoint
+      console.log('🍍 [CONFIG] Detected ElastiCache Serverless endpoint')
+      return ConfigHelpers.forElastiCacheServerless(endpoint, options?.authToken || '', options?.region)
+    } else {
+      // This is likely a standard replication group or single node
+      console.log('🍍 [CONFIG] Detected standard ElastiCache endpoint')
+      return ConfigHelpers.forElastiCache(endpoint, options)
+    }
+  },
+
+  /**
    * Configuration without Redis (degraded mode)
    */
   withoutRedis: () => createAuthConfig({

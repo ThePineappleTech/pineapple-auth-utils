@@ -51,6 +51,7 @@ export declare class PineappleAuth {
     private extractServiceFromAuth;
     private getRedisUrl;
     private getRedisOptions;
+    private getRedisClusterOptions;
     private maskCredentials;
 }
 export declare function createAuthMiddleware(config: AuthConfig | LegacyAuthConfig): PineappleAuth;
