@@ -96,6 +96,13 @@ export class PineappleAuth {
       console.log(`[JWT-AUTH-${requestId}] 🎫 Token preview: ${token.substring(0, 20)}...`);
       
       try {
+        if (!this.config.jwt.secret) {
+          console.log(`[JWT-AUTH-${requestId}] ❌ JWT secret not configured`);
+          return res.status(500).json({ 
+            error: 'Authentication configuration error' 
+          });
+        }
+
         console.log(`[JWT-AUTH-${requestId}] 🔍 Verifying JWT with secret: ${this.config.jwt.secret.substring(0, 10)}...`);
         console.log(`[JWT-AUTH-${requestId}] 🔍 Expected issuer: ${this.config.jwt.issuer}`);
         

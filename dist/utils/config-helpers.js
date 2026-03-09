@@ -44,14 +44,15 @@ function createAuthConfig(options) {
             }
         }
     };
+    const envDefaults = defaults[env] || defaults.development;
     const config = {
         jwt: {
-            secret: options.jwt?.secret || defaults[env].jwt.secret,
-            issuer: options.jwt?.issuer || defaults[env].jwt.issuer
+            secret: options.jwt?.secret || envDefaults.jwt.secret,
+            issuer: options.jwt?.issuer || envDefaults.jwt.issuer
         },
         aws: {
-            region: options.aws?.region || defaults[env].aws.region,
-            service: options.aws?.service || defaults[env].aws.service
+            region: options.aws?.region || envDefaults.aws.region,
+            service: options.aws?.service || envDefaults.aws.service
         }
     };
     // Handle Redis configuration
@@ -191,6 +192,69 @@ exports.ConfigHelpers = {
     forAWS: (redisClusterEndpoint, region = 'us-east-1') => createAuthConfig({
         aws: { region, service: 'pineapple' },
         redis: { url: `redis://${redisClusterEndpoint}:6379` }
+    }),
+    /**
+     * Configuration for AWS ElastiCache with advanced options
+     */
+    forElastiCache: (endpoint, options) => {
+        const port = options?.port || (options?.tls ? 6380 : 6379);
+        const protocol = options?.tls ? 'rediss' : 'redis';
+        let url = `${protocol}://`;
+        if (options?.authToken) {
+            url += `:${options.authToken}@`;
+        }
+        url += `${endpoint}:${port}`;
+        return createAuthConfig({
+            aws: { region: options?.region || 'us-east-1', service: 'pineapple' },
+            redis: {
+                url,
+                tls: options?.tls ? {
+                    servername: endpoint,
+                    rejectUnauthorized: true
+                } : false,
+                connectTimeout: options?.connectTimeout || 20000,
+                commandTimeout: 5000,
+                retryDelayOnFailover: 100,
+                enableOfflineQueue: false,
+                maxRetriesPerRequest: 3,
+                retryConnect: 3
+            }
+        });
+    },
+    /**
+     * Configuration for AWS ElastiCache Serverless
+     */
+    forElastiCacheServerless: (endpoint, authToken, region = 'us-east-1') => {
+        return createAuthConfig({
+            aws: { region, service: 'pineapple' },
+            redis: {
+                url: `rediss://:${authToken}@${endpoint}:6380`,
+                tls: {
+                    servername: endpoint,
+                    rejectUnauthorized: true
+                },
+                connectTimeout: 20000,
+                commandTimeout: 5000,
+                retryDelayOnFailover: 100,
+                enableOfflineQueue: false,
+                maxRetriesPerRequest: 3,
+                retryConnect: 3
+            }
+        });
+    },
+    /**
+     * Configuration for Valkey (Redis alternative)
+     */
+    forValkey: (endpoint, port = 6379, authToken) => createAuthConfig({
+        redis: {
+            host: endpoint,
+            port,
+            password: authToken,
+            protocol: 'valkey',
+            connectTimeout: 10000,
+            commandTimeout: 5000,
+            maxRetriesPerRequest: 3
+        }
     }),
     /**
      * Configuration for Docker Compose development

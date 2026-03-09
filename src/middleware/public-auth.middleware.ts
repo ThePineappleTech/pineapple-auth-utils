@@ -113,6 +113,13 @@ export class PublicAuthMiddleware {
       }
       
       try {
+        if (!this.config.jwt.secret) {
+          console.log(`[PUBLIC-AUTH-${requestId}] ❌ JWT secret not configured`);
+          return res.status(500).json({ 
+            error: 'Authentication configuration error' 
+          });
+        }
+
         if (process.env.NODE_ENV !== 'production') {
           console.log(`[PUBLIC-AUTH-${requestId}] 🔍 Verifying JWT with secret: ${this.config.jwt.secret.substring(0, 10)}...`);
           console.log(`[PUBLIC-AUTH-${requestId}] 🔍 Expected issuer: ${this.config.jwt.issuer}`);

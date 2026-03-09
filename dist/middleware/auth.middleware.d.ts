@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-interface AuthConfig {
+import type { AuthConfig } from '../index';
+interface LegacyAuthConfig {
     jwt: {
         secret: string;
         issuer: string;
@@ -28,9 +29,9 @@ declare global {
     }
 }
 export declare class PineappleAuth {
-    private config;
     private redisClient?;
-    constructor(config: AuthConfig);
+    private config;
+    constructor(config: AuthConfig | LegacyAuthConfig);
     /**
      * Middleware for JWT authentication (frontend -> service)
      */
@@ -48,7 +49,10 @@ export declare class PineappleAuth {
      */
     revokeToken(tokenId: string, expirySeconds?: number): Promise<void>;
     private extractServiceFromAuth;
+    private getRedisUrl;
+    private getRedisOptions;
+    private maskCredentials;
 }
-export declare function createAuthMiddleware(config: AuthConfig): PineappleAuth;
+export declare function createAuthMiddleware(config: AuthConfig | LegacyAuthConfig): PineappleAuth;
 export {};
 //# sourceMappingURL=auth.middleware.d.ts.map

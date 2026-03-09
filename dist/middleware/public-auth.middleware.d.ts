@@ -1,10 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
-interface AuthConfig {
+import type { RedisConfig } from '../index';
+interface PublicAuthConfig {
     jwt: {
         secret: string;
         issuer: string;
     };
-    redis?: {
+    redis?: RedisConfig | {
         url: string;
     };
 }
@@ -28,15 +29,18 @@ declare global {
  * (pineapple-api, pineapple-motor-service, pineapple-building-and-contents-service)
  */
 export declare class PublicAuthMiddleware {
-    private config;
     private redisClient?;
-    constructor(config: AuthConfig);
+    private config;
+    constructor(config: PublicAuthConfig);
     /**
      * Validate JWT tokens from frontend applications
      * This is the ONLY authentication method supported
      */
     validateJWT: (req: Request, res: Response, next: NextFunction) => Promise<void | Response<any, Record<string, any>>>;
+    private getRedisUrl;
+    private getRedisOptions;
+    private maskCredentials;
 }
-export declare function createPublicAuth(config: AuthConfig): PublicAuthMiddleware;
+export declare function createPublicAuth(config: PublicAuthConfig): PublicAuthMiddleware;
 export {};
 //# sourceMappingURL=public-auth.middleware.d.ts.map

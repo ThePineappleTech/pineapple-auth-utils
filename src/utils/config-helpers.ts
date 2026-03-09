@@ -18,7 +18,10 @@ export function createAuthConfig(options: {
   const env = options.environment || process.env.NODE_ENV || 'development'
   
   // Default configurations per environment
-  const defaults = {
+  const defaults: Record<string, {
+    jwt: { secret?: string; issuer: string }
+    aws: { region: string; service: string }
+  }> = {
     development: {
       jwt: {
         secret: process.env.JWT_SECRET || 'dev-secret-change-in-production',
@@ -51,14 +54,16 @@ export function createAuthConfig(options: {
     }
   }
 
+  const envDefaults = defaults[env] || defaults.development
+  
   const config: AuthConfig = {
     jwt: {
-      secret: options.jwt?.secret || defaults[env].jwt.secret,
-      issuer: options.jwt?.issuer || defaults[env].jwt.issuer
+      secret: options.jwt?.secret || envDefaults.jwt.secret,
+      issuer: options.jwt?.issuer || envDefaults.jwt.issuer
     },
     aws: {
-      region: options.aws?.region || defaults[env].aws.region,
-      service: options.aws?.service || defaults[env].aws.service
+      region: options.aws?.region || envDefaults.aws.region,
+      service: options.aws?.service || envDefaults.aws.service
     }
   }
 

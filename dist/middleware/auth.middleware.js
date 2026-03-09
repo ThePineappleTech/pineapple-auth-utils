@@ -40,9 +40,9 @@ exports.PineappleAuth = void 0;
 exports.createAuthMiddleware = createAuthMiddleware;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const Redis = __importStar(require("redis"));
+const config_helpers_1 = require("../utils/config-helpers");
 class PineappleAuth {
     constructor(config) {
-        this.config = config;
         /**
          * Middleware for JWT authentication (frontend -> service)
          */
@@ -68,6 +68,12 @@ class PineappleAuth {
                 console.log(`[JWT-AUTH-${requestId}] 🎫 Token extracted (length: ${token.length})`);
                 console.log(`[JWT-AUTH-${requestId}] 🎫 Token preview: ${token.substring(0, 20)}...`);
                 try {
+                    if (!this.config.jwt.secret) {
+                        console.log(`[JWT-AUTH-${requestId}] ❌ JWT secret not configured`);
+                        return res.status(500).json({
+                            error: 'Authentication configuration error'
+                        });
+                    }
                     console.log(`[JWT-AUTH-${requestId}] 🔍 Verifying JWT with secret: ${this.config.jwt.secret.substring(0, 10)}...`);
                     console.log(`[JWT-AUTH-${requestId}] 🔍 Expected issuer: ${this.config.jwt.issuer}`);
                     const decoded = jsonwebtoken_1.default.verify(token, this.config.jwt.secret, {
@@ -239,18 +245,25 @@ class PineappleAuth {
                 });
             }
         };
+        this.config = config;
         console.log('🍍 [PINEAPPLE-AUTH] Initializing authentication middleware');
         console.log('🍍 [PINEAPPLE-AUTH] JWT Issuer:', config.jwt.issuer);
         console.log('🍍 [PINEAPPLE-AUTH] JWT Secret configured:', config.jwt.secret ? 'YES' : 'NO');
         console.log('🍍 [PINEAPPLE-AUTH] Redis configured:', config.redis ? 'YES' : 'NO');
         if (config.redis) {
-            console.log('🍍 [PINEAPPLE-AUTH] Connecting to Redis:', config.redis.url);
-            this.redisClient = Redis.createClient({ url: config.redis.url });
-            this.redisClient.connect()
-                .then(() => console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis connected successfully'))
-                .catch((error) => {
-                console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis connection failed:', error);
-            });
+            try {
+                const redisOptions = this.getRedisOptions(config.redis);
+                console.log('🍍 [PINEAPPLE-AUTH] Connecting to Redis:', this.maskCredentials(redisOptions.url || redisOptions.socket?.host || 'unknown'));
+                this.redisClient = Redis.createClient(redisOptions);
+                this.redisClient.connect()
+                    .then(() => console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis connected successfully'))
+                    .catch((error) => {
+                    console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis connection failed:', error);
+                });
+            }
+            catch (error) {
+                console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis configuration error:', error.message);
+            }
         }
         console.log('🍍 [PINEAPPLE-AUTH] ✅ Authentication middleware initialized');
     }
@@ -268,6 +281,100 @@ class PineappleAuth {
         // This is a simplified version - you'd enhance this based on your needs
         const credentialMatch = authHeader.match(/Credential=([^\/]+)\//);
         return credentialMatch ? credentialMatch[1] : null;
+    }
+    getRedisUrl(redisConfig) {
+        // Handle legacy format
+        if ('url' in redisConfig && typeof redisConfig.url === 'string') {
+            return redisConfig.url;
+        }
+        // Handle new flexible format
+        return (0, config_helpers_1.validateRedisConfig)(redisConfig);
+    }
+    getRedisOptions(redisConfig) {
+        // Handle legacy format
+        if ('url' in redisConfig && typeof redisConfig.url === 'string' && Object.keys(redisConfig).length === 1) {
+            return { url: redisConfig.url };
+        }
+        const config = redisConfig;
+        // If URL is provided with additional options, use URL but apply extra options
+        if (config.url) {
+            const options = { url: config.url };
+            // Add TLS options if specified
+            if (config.tls) {
+                if (typeof config.tls === 'boolean' && config.tls) {
+                    options.socket = { tls: true };
+                }
+                else if (typeof config.tls === 'object') {
+                    options.socket = {
+                        tls: true,
+                        servername: config.tls.servername,
+                        rejectUnauthorized: config.tls.rejectUnauthorized
+                    };
+                }
+            }
+            // Add timeout options
+            if (config.connectTimeout)
+                options.socket = { ...options.socket, connectTimeout: config.connectTimeout };
+            if (config.commandTimeout)
+                options.commandTimeout = config.commandTimeout;
+            // Add retry options  
+            if (config.retryDelayOnFailover)
+                options.retryDelayOnFailover = config.retryDelayOnFailover;
+            if (config.enableOfflineQueue !== undefined)
+                options.enableOfflineQueue = config.enableOfflineQueue;
+            if (config.maxRetriesPerRequest)
+                options.maxRetriesPerRequest = config.maxRetriesPerRequest;
+            if (config.retryConnect)
+                options.retryConnect = config.retryConnect;
+            return options;
+        }
+        // Build from individual components
+        const options = {
+            socket: {
+                host: config.host || 'localhost',
+                port: config.port || 6379
+            }
+        };
+        if (config.password)
+            options.password = config.password;
+        if (config.username)
+            options.username = config.username;
+        if (config.db)
+            options.database = config.db;
+        if (config.family)
+            options.socket.family = config.family;
+        // TLS configuration
+        if (config.tls) {
+            if (typeof config.tls === 'boolean' && config.tls) {
+                options.socket.tls = true;
+            }
+            else if (typeof config.tls === 'object') {
+                options.socket.tls = true;
+                if (config.tls.servername)
+                    options.socket.servername = config.tls.servername;
+                if (config.tls.rejectUnauthorized !== undefined)
+                    options.socket.rejectUnauthorized = config.tls.rejectUnauthorized;
+            }
+        }
+        // Timeout options
+        if (config.connectTimeout)
+            options.socket.connectTimeout = config.connectTimeout;
+        if (config.commandTimeout)
+            options.commandTimeout = config.commandTimeout;
+        // Retry options
+        if (config.retryDelayOnFailover)
+            options.retryDelayOnFailover = config.retryDelayOnFailover;
+        if (config.enableOfflineQueue !== undefined)
+            options.enableOfflineQueue = config.enableOfflineQueue;
+        if (config.maxRetriesPerRequest)
+            options.maxRetriesPerRequest = config.maxRetriesPerRequest;
+        if (config.retryConnect)
+            options.retryConnect = config.retryConnect;
+        return options;
+    }
+    maskCredentials(url) {
+        // Mask credentials in logs for security
+        return url.replace(/:\/\/[^@]*@/, '://***:***@');
     }
 }
 exports.PineappleAuth = PineappleAuth;

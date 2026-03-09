@@ -59,6 +59,24 @@ export declare const ConfigHelpers: {
      */
     forAWS: (redisClusterEndpoint: string, region?: string) => AuthConfig;
     /**
+     * Configuration for AWS ElastiCache with advanced options
+     */
+    forElastiCache: (endpoint: string, options?: {
+        port?: number;
+        tls?: boolean;
+        authToken?: string;
+        region?: string;
+        connectTimeout?: number;
+    }) => AuthConfig;
+    /**
+     * Configuration for AWS ElastiCache Serverless
+     */
+    forElastiCacheServerless: (endpoint: string, authToken: string, region?: string) => AuthConfig;
+    /**
+     * Configuration for Valkey (Redis alternative)
+     */
+    forValkey: (endpoint: string, port?: number, authToken?: string) => AuthConfig;
+    /**
      * Configuration for Docker Compose development
      */
     forDocker: () => AuthConfig;
