@@ -16,37 +16,47 @@ class PublicAuthMiddleware {
     constructor(config) {
         /**
          * Validate JWT tokens from frontend applications
-         * This is the ONLY authentication method supported
+         * Supports both HttpOnly cookies and Authorization header
          */
         this.validateJWT = async (req, res, next) => {
             const requestId = Math.random().toString(36).substr(2, 9);
-            if (process.env.NODE_ENV !== 'production') {
+            if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                 console.log(`[PUBLIC-AUTH-${requestId}] 🔐 Starting JWT validation for ${req.method} ${req.path}`);
             }
             try {
                 // Allow OPTIONS requests
                 if (req.method === 'OPTIONS') {
-                    if (process.env.NODE_ENV !== 'production') {
+                    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                         console.log(`[PUBLIC-AUTH-${requestId}] ✅ OPTIONS request - bypassing auth`);
                     }
                     return next();
                 }
-                const authHeader = req.headers.authorization;
-                if (process.env.NODE_ENV !== 'production') {
-                    console.log(`[PUBLIC-AUTH-${requestId}] 📝 Auth header present: ${authHeader ? 'YES' : 'NO'}`);
+                // Check for token in HttpOnly cookies first (preferred method)
+                let token = req.cookies?.['pineapple-access-token'];
+                let tokenSource = 'cookie';
+                if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+                    console.log(`[PUBLIC-AUTH-${requestId}] 🍪 Cookie token present: ${token ? 'YES' : 'NO'}`);
                 }
-                if (!authHeader?.startsWith('Bearer ')) {
-                    if (process.env.NODE_ENV !== 'production') {
-                        console.log(`[PUBLIC-AUTH-${requestId}] ❌ Invalid auth header format: ${authHeader || 'missing'}`);
+                // Fallback to Authorization header if no cookie token
+                if (!token) {
+                    const authHeader = req.headers.authorization;
+                    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+                        console.log(`[PUBLIC-AUTH-${requestId}] 📝 Auth header present: ${authHeader ? 'YES' : 'NO'}`);
                     }
-                    return res.status(403).json({
-                        success: false,
-                        error: { message: 'JWT Bearer token required' }
-                    });
+                    if (!authHeader?.startsWith('Bearer ')) {
+                        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+                            console.log(`[PUBLIC-AUTH-${requestId}] ❌ No token found in cookies or auth header`);
+                        }
+                        return res.status(403).json({
+                            success: false,
+                            error: { message: 'JWT token required (cookie or Authorization header)' }
+                        });
+                    }
+                    token = authHeader.substring(7);
+                    tokenSource = 'header';
                 }
-                const token = authHeader.substring(7);
-                if (process.env.NODE_ENV !== 'production') {
-                    console.log(`[PUBLIC-AUTH-${requestId}] 🎫 Token extracted (length: ${token.length})`);
+                if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+                    console.log(`[PUBLIC-AUTH-${requestId}] 🎫 Token extracted from ${tokenSource} (length: ${token.length})`);
                     console.log(`[PUBLIC-AUTH-${requestId}] 🎫 Token preview: ${token.substring(0, 20)}...`);
                 }
                 try {
@@ -56,14 +66,14 @@ class PublicAuthMiddleware {
                             error: 'Authentication configuration error'
                         });
                     }
-                    if (process.env.NODE_ENV !== 'production') {
+                    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                         console.log(`[PUBLIC-AUTH-${requestId}] 🔍 Verifying JWT with secret: ${this.config.jwt.secret.substring(0, 10)}...`);
                         console.log(`[PUBLIC-AUTH-${requestId}] 🔍 Expected issuer: ${this.config.jwt.issuer}`);
                     }
                     const decoded = jsonwebtoken_1.default.verify(token, this.config.jwt.secret, {
                         issuer: this.config.jwt.issuer
                     });
-                    if (process.env.NODE_ENV !== 'production') {
+                    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                         console.log(`[PUBLIC-AUTH-${requestId}] ✅ JWT decoded successfully`);
                         console.log(`[PUBLIC-AUTH-${requestId}] 👤 User: ${decoded.email} (ID: ${decoded.userId})`);
                         console.log(`[PUBLIC-AUTH-${requestId}] 🎭 Role: ${decoded.role || 'none'}`);
@@ -72,12 +82,12 @@ class PublicAuthMiddleware {
                     }
                     // Check if token is revoked (if Redis is available)
                     if (this.redisClient) {
-                        if (process.env.NODE_ENV !== 'production') {
+                        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                             console.log(`[PUBLIC-AUTH-${requestId}] 🔄 Checking token revocation in Redis`);
                         }
                         const isRevoked = await this.redisClient.get(`revoked:${decoded.jti}`);
                         if (isRevoked) {
-                            if (process.env.NODE_ENV !== 'production') {
+                            if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                                 console.log(`[PUBLIC-AUTH-${requestId}] ❌ Token is revoked`);
                             }
                             return res.status(403).json({
@@ -85,22 +95,22 @@ class PublicAuthMiddleware {
                                 error: { message: 'Token has been revoked' }
                             });
                         }
-                        if (process.env.NODE_ENV !== 'production') {
+                        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                             console.log(`[PUBLIC-AUTH-${requestId}] ✅ Token not revoked`);
                         }
                     }
                     else {
-                        if (process.env.NODE_ENV !== 'production') {
+                        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                             console.log(`[PUBLIC-AUTH-${requestId}] ⚠️  Redis not configured - skipping revocation check`);
                         }
                     }
                     // Validate token hasn't expired (additional security)
                     const now = Math.floor(Date.now() / 1000);
-                    if (process.env.NODE_ENV !== 'production') {
+                    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                         console.log(`[PUBLIC-AUTH-${requestId}] ⏰ Current time: ${now}, Token exp: ${decoded.exp}`);
                     }
                     if (decoded.exp && decoded.exp < now) {
-                        if (process.env.NODE_ENV !== 'production') {
+                        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                             console.log(`[PUBLIC-AUTH-${requestId}] ❌ Token expired (exp check)`);
                         }
                         return res.status(403).json({
@@ -116,18 +126,18 @@ class PublicAuthMiddleware {
                         tokenId: decoded.jti,
                         type: 'jwt'
                     };
-                    if (process.env.NODE_ENV !== 'production') {
-                        console.log(`[PUBLIC-AUTH-${requestId}] ✅ Authentication successful - proceeding to next middleware`);
+                    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+                        console.log(`[PUBLIC-AUTH-${requestId}] ✅ Authentication successful via ${tokenSource} - proceeding to next middleware`);
                     }
                     next();
                 }
                 catch (jwtError) {
-                    if (process.env.NODE_ENV !== 'production') {
+                    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                         console.log(`[PUBLIC-AUTH-${requestId}] ❌ JWT verification failed: ${jwtError.name}`);
                         console.log(`[PUBLIC-AUTH-${requestId}] ❌ JWT error details: ${jwtError.message}`);
                     }
                     if (jwtError.name === 'TokenExpiredError') {
-                        if (process.env.NODE_ENV !== 'production') {
+                        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                             console.log(`[PUBLIC-AUTH-${requestId}] ⏰ Token expired at: ${new Date(jwtError.expiredAt).toISOString()}`);
                         }
                         return res.status(403).json({
@@ -142,7 +152,7 @@ class PublicAuthMiddleware {
                 }
             }
             catch (error) {
-                if (process.env.NODE_ENV !== 'production') {
+                if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                     console.log(`[PUBLIC-AUTH-${requestId}] 💥 Unexpected error during JWT validation:`, error);
                 }
                 return res.status(500).json({
@@ -152,7 +162,7 @@ class PublicAuthMiddleware {
             }
         };
         this.config = config;
-        if (process.env.NODE_ENV !== 'production') {
+        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
             console.log('🍍 [PUBLIC-AUTH] Initializing public authentication middleware');
             console.log('🍍 [PUBLIC-AUTH] JWT Issuer:', config.jwt.issuer);
             console.log('🍍 [PUBLIC-AUTH] JWT Secret configured:', config.jwt.secret ? 'YES' : 'NO');
@@ -163,17 +173,17 @@ class PublicAuthMiddleware {
                 const redisConfig = config.redis;
                 // Check if cluster configuration is provided
                 if (redisConfig.cluster) {
-                    if (process.env.NODE_ENV !== 'production') {
+                    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                         console.log('🍍 [PUBLIC-AUTH] Initializing Redis Cluster connection');
                     }
                     const clusterOptions = this.getRedisClusterOptions(redisConfig);
-                    if (process.env.NODE_ENV !== 'production') {
+                    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                         console.log('🍍 [PUBLIC-AUTH] Connecting to Redis Cluster with', clusterOptions.rootNodes?.length || 0, 'root nodes');
                     }
                     this.redisClient = (0, redis_1.createCluster)(clusterOptions);
                     this.redisClient.connect()
                         .then(() => {
-                        if (process.env.NODE_ENV !== 'production') {
+                        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                             console.log('🍍 [PUBLIC-AUTH] ✅ Redis Cluster connected successfully');
                         }
                     })
@@ -184,13 +194,13 @@ class PublicAuthMiddleware {
                 else {
                     // Standard single Redis instance
                     const redisOptions = this.getRedisOptions(config.redis);
-                    if (process.env.NODE_ENV !== 'production') {
+                    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                         console.log('🍍 [PUBLIC-AUTH] Connecting to Redis:', this.maskCredentials(redisOptions.url || redisOptions.socket?.host || 'unknown'));
                     }
                     this.redisClient = (0, redis_1.createClient)(redisOptions);
                     this.redisClient.connect()
                         .then(() => {
-                        if (process.env.NODE_ENV !== 'production') {
+                        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
                             console.log('🍍 [PUBLIC-AUTH] ✅ Redis connected successfully');
                         }
                     })
@@ -203,7 +213,7 @@ class PublicAuthMiddleware {
                 console.error('🍍 [PUBLIC-AUTH] ❌ Redis configuration error:', error.message);
             }
         }
-        if (process.env.NODE_ENV !== 'production') {
+        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
             console.log('🍍 [PUBLIC-AUTH] ✅ Public authentication middleware initialized');
         }
     }

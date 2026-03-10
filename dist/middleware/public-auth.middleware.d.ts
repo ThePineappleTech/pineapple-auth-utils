@@ -34,7 +34,7 @@ export declare class PublicAuthMiddleware {
     constructor(config: PublicAuthConfig);
     /**
      * Validate JWT tokens from frontend applications
-     * This is the ONLY authentication method supported
+     * Supports both HttpOnly cookies and Authorization header
      */
     validateJWT: (req: Request, res: Response, next: NextFunction) => Promise<void | Response<any, Record<string, any>>>;
     private getRedisUrl;
