@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken'
+import jwt, { SignOptions } from 'jsonwebtoken'
 import crypto from 'crypto'
 import aws4 from 'aws4'
 import { STS } from '@aws-sdk/client-sts'
@@ -33,6 +33,8 @@ export class PineappleAuthClient {
         accessSecret: string
         refreshSecret: string
         issuer: string
+        accessExpiresIn?: string
+        refreshExpiresIn?: string
       }
       aws?: {
         region: string
@@ -68,27 +70,22 @@ export class PineappleAuthClient {
       jti: tokenId
     }
 
-    const accessToken = jwt.sign(
-      payload,
-      this.config.jwt.accessSecret,
-      {
-        expiresIn: '15m',
-        issuer: this.config.jwt.issuer,
-        audience: 'pineapple-services',
-        subject: userId
-      }
-    )
+    const accessOptions: SignOptions = {
+      expiresIn: this.config.jwt.accessExpiresIn || '15m' as any,
+      issuer: this.config.jwt.issuer,
+      audience: 'pineapple-services',
+      subject: userId
+    }
 
-    const refreshToken = jwt.sign(
-      { userId, jti: tokenId },
-      this.config.jwt.refreshSecret,
-      {
-        expiresIn: '30d',
-        issuer: this.config.jwt.issuer,
-        audience: 'pineapple-refresh',
-        subject: userId
-      }
-    )
+    const refreshOptions: SignOptions = {
+      expiresIn: this.config.jwt.refreshExpiresIn || '30d' as any,
+      issuer: this.config.jwt.issuer,
+      audience: 'pineapple-refresh',
+      subject: userId
+    }
+
+    const accessToken = jwt.sign(payload, this.config.jwt.accessSecret, accessOptions)
+    const refreshToken = jwt.sign({ userId, jti: tokenId }, this.config.jwt.refreshSecret, refreshOptions)
 
     return { accessToken, refreshToken, tokenId }
   }

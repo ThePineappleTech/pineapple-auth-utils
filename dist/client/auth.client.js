@@ -31,18 +31,20 @@ class PineappleAuthClient {
             permissions,
             jti: tokenId
         };
-        const accessToken = jsonwebtoken_1.default.sign(payload, this.config.jwt.accessSecret, {
-            expiresIn: '15m',
+        const accessOptions = {
+            expiresIn: this.config.jwt.accessExpiresIn || '15m',
             issuer: this.config.jwt.issuer,
             audience: 'pineapple-services',
             subject: userId
-        });
-        const refreshToken = jsonwebtoken_1.default.sign({ userId, jti: tokenId }, this.config.jwt.refreshSecret, {
-            expiresIn: '30d',
+        };
+        const refreshOptions = {
+            expiresIn: this.config.jwt.refreshExpiresIn || '30d',
             issuer: this.config.jwt.issuer,
             audience: 'pineapple-refresh',
             subject: userId
-        });
+        };
+        const accessToken = jsonwebtoken_1.default.sign(payload, this.config.jwt.accessSecret, accessOptions);
+        const refreshToken = jsonwebtoken_1.default.sign({ userId, jti: tokenId }, this.config.jwt.refreshSecret, refreshOptions);
         return { accessToken, refreshToken, tokenId };
     }
     /**

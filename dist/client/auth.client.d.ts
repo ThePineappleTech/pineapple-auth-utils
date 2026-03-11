@@ -18,6 +18,8 @@ export declare class PineappleAuthClient {
             accessSecret: string;
             refreshSecret: string;
             issuer: string;
+            accessExpiresIn?: string;
+            refreshExpiresIn?: string;
         };
         aws?: {
             region: string;
