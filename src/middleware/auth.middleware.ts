@@ -5,6 +5,7 @@ import aws4 from 'aws4'
 import * as Redis from 'redis'
 import type { AuthConfig, RedisConfig } from '../index'
 import { validateRedisConfig } from '../utils/config-helpers'
+import { ElastiCacheConnectionManager, type RedisConnectionManager } from '../utils/redis-connection-manager'
 
 interface LegacyAuthConfig {
   jwt: {
@@ -39,6 +40,7 @@ declare global {
 
 export class PineappleAuth {
   private redisClient?: Redis.RedisClientType | Redis.RedisClusterType
+  private redisManager?: RedisConnectionManager
   private config: AuthConfig | LegacyAuthConfig
   
   constructor(config: AuthConfig | LegacyAuthConfig) {
@@ -52,28 +54,20 @@ export class PineappleAuth {
       try {
         const redisConfig = config.redis as RedisConfig
         
-        // Check if cluster configuration is provided
-        if (redisConfig.cluster) {
-          console.log('🍍 [PINEAPPLE-AUTH] Initializing Redis Cluster connection');
-          const clusterOptions = this.getRedisClusterOptions(redisConfig)
-          console.log('🍍 [PINEAPPLE-AUTH] Connecting to Redis Cluster with', clusterOptions.rootNodes?.length || 0, 'root nodes');
-          this.redisClient = Redis.createCluster(clusterOptions)
-          this.redisClient.connect()
-            .then(() => console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis Cluster connected successfully'))
-            .catch((error) => {
-              console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis Cluster connection failed:', error);
-            })
-        } else {
-          // Standard single Redis instance
-          const redisOptions = this.getRedisOptions(config.redis)
-          console.log('🍍 [PINEAPPLE-AUTH] Connecting to Redis:', this.maskCredentials(redisOptions.url || redisOptions.socket?.host || 'unknown'));
-          this.redisClient = Redis.createClient(redisOptions)
-          this.redisClient.connect()
-            .then(() => console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis connected successfully'))
-            .catch((error) => {
-              console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis connection failed:', error);
-            })
-        }
+        console.log('🍍 [PINEAPPLE-AUTH] Initializing resilient Redis/ElastiCache connection');
+        
+        // Use the connection manager for resilient connections
+        this.redisManager = new ElastiCacheConnectionManager(redisConfig)
+        
+        // Initialize connection in the background
+        this.redisManager.connect()
+          .then(() => {
+            console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis/ElastiCache connected successfully with automatic reconnection')
+          })
+          .catch((error: any) => {
+            console.error('🍍 [PINEAPPLE-AUTH] ❌ Initial Redis/ElastiCache connection failed:', error);
+            console.log('🍍 [PINEAPPLE-AUTH] ⚠️  Connection will be retried automatically when needed');
+          })
       } catch (error) {
         console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis configuration error:', (error as Error).message);
       }
@@ -134,17 +128,24 @@ export class PineappleAuth {
         console.log(`[JWT-AUTH-${requestId}] ⏰ Expires: ${decoded.exp ? new Date(decoded.exp * 1000).toISOString() : 'never'}`);
 
         // Check if token is revoked (if Redis is available)
-        if (this.redisClient) {
-          console.log(`[JWT-AUTH-${requestId}] 🔄 Checking token revocation in Redis`);
-          const isRevoked = await this.redisClient.get(`revoked:${decoded.jti}`)
-          if (isRevoked) {
-            console.log(`[JWT-AUTH-${requestId}] ❌ Token is revoked`);
-            return res.status(403).json({
-              success: false,
-              error: { message: 'Token has been revoked' }
-            })
+        if (this.redisManager) {
+          console.log(`[JWT-AUTH-${requestId}] 🔄 Checking token revocation in Redis/ElastiCache`);
+          
+          try {
+            const isRevoked = await this.redisManager.get(`revoked:${decoded.jti}`)
+            if (isRevoked) {
+              console.log(`[JWT-AUTH-${requestId}] ❌ Token is revoked`);
+              return res.status(403).json({
+                success: false,
+                error: { message: 'Token has been revoked' }
+              })
+            }
+            console.log(`[JWT-AUTH-${requestId}] ✅ Token not revoked`);
+          } catch (redisError) {
+            // Log the error but don't block authentication - degraded mode
+            console.error(`[JWT-AUTH-${requestId}] ⚠️  Redis/ElastiCache error during revocation check:`, redisError);
+            console.log(`[JWT-AUTH-${requestId}] 🔄 Continuing in degraded mode without revocation check`);
           }
-          console.log(`[JWT-AUTH-${requestId}] ✅ Token not revoked`);
         } else {
           console.log(`[JWT-AUTH-${requestId}] ⚠️  Redis not configured - skipping revocation check`);
         }
@@ -239,19 +240,26 @@ export class PineappleAuth {
       }
 
       // Check nonce hasn't been used (if Redis available)
-      if (this.redisClient) {
-        console.log(`[SERVICE-AUTH-${requestId}] 🔄 Checking nonce replay in Redis`);
-        const nonceUsed = await this.redisClient.get(`nonce:${nonce}`)
-        if (nonceUsed) {
-          console.log(`[SERVICE-AUTH-${requestId}] ❌ Nonce already used - replay attack detected`);
-          return res.status(403).json({
-            success: false,
-            error: { message: 'Request nonce already used' }
-          })
+      if (this.redisManager) {
+        console.log(`[SERVICE-AUTH-${requestId}] 🔄 Checking nonce replay in Redis/ElastiCache`);
+        
+        try {
+          const nonceUsed = await this.redisManager.get(`nonce:${nonce}`)
+          if (nonceUsed) {
+            console.log(`[SERVICE-AUTH-${requestId}] ❌ Nonce already used - replay attack detected`);
+            return res.status(403).json({
+              success: false,
+              error: { message: 'Request nonce already used' }
+            })
+          }
+          // Store nonce for 5 minutes
+          await this.redisManager.setEx(`nonce:${nonce}`, 300, 'used')
+          console.log(`[SERVICE-AUTH-${requestId}] ✅ Nonce stored for replay protection`);
+        } catch (redisError) {
+          // Log the error but don't block authentication - degraded mode
+          console.error(`[SERVICE-AUTH-${requestId}] ⚠️  Redis/ElastiCache error during nonce check:`, redisError);
+          console.log(`[SERVICE-AUTH-${requestId}] 🔄 Continuing in degraded mode without nonce replay check`);
         }
-        // Store nonce for 5 minutes
-        await this.redisClient.setEx(`nonce:${nonce}`, 300, 'used')
-        console.log(`[SERVICE-AUTH-${requestId}] ✅ Nonce stored for replay protection`);
       } else {
         console.log(`[SERVICE-AUTH-${requestId}] ⚠️  Redis not configured - skipping nonce replay check`);
       }
@@ -310,10 +318,10 @@ export class PineappleAuth {
    * Revoke JWT token (requires Redis)
    */
   async revokeToken(tokenId: string, expirySeconds: number = 86400): Promise<void> {
-    if (!this.redisClient) {
+    if (!this.redisManager) {
       throw new Error('Redis not configured for token revocation')
     }
-    await this.redisClient.setEx(`revoked:${tokenId}`, expirySeconds, 'true')
+    await this.redisManager.setEx(`revoked:${tokenId}`, expirySeconds, 'true')
   }
 
   private extractServiceFromAuth(authHeader: string): string | null {

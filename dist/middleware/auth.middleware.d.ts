@@ -30,6 +30,7 @@ declare global {
 }
 export declare class PineappleAuth {
     private redisClient?;
+    private redisManager?;
     private config;
     constructor(config: AuthConfig | LegacyAuthConfig);
     /**

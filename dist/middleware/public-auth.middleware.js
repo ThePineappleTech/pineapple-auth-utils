@@ -6,8 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PublicAuthMiddleware = void 0;
 exports.createPublicAuth = createPublicAuth;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const redis_1 = require("redis");
 const config_helpers_1 = require("../utils/config-helpers");
+const redis_connection_manager_1 = require("../utils/redis-connection-manager");
 /**
  * JWT-only authentication middleware for PUBLIC-FACING services
  * (pineapple-api, pineapple-motor-service, pineapple-building-and-contents-service)
@@ -81,22 +81,29 @@ class PublicAuthMiddleware {
                         console.log(`[PUBLIC-AUTH-${requestId}] ⏰ Expires: ${decoded.exp ? new Date(decoded.exp * 1000).toISOString() : 'never'}`);
                     }
                     // Check if token is revoked (if Redis is available)
-                    if (this.redisClient) {
+                    if (this.redisManager) {
                         if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
-                            console.log(`[PUBLIC-AUTH-${requestId}] 🔄 Checking token revocation in Redis`);
+                            console.log(`[PUBLIC-AUTH-${requestId}] 🔄 Checking token revocation in Redis/ElastiCache`);
                         }
-                        const isRevoked = await this.redisClient.get(`revoked:${decoded.jti}`);
-                        if (isRevoked) {
-                            if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
-                                console.log(`[PUBLIC-AUTH-${requestId}] ❌ Token is revoked`);
+                        try {
+                            const isRevoked = await this.redisManager.get(`revoked:${decoded.jti}`);
+                            if (isRevoked) {
+                                if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+                                    console.log(`[PUBLIC-AUTH-${requestId}] ❌ Token is revoked`);
+                                }
+                                return res.status(403).json({
+                                    success: false,
+                                    error: { message: 'Token has been revoked' }
+                                });
                             }
-                            return res.status(403).json({
-                                success: false,
-                                error: { message: 'Token has been revoked' }
-                            });
+                            if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+                                console.log(`[PUBLIC-AUTH-${requestId}] ✅ Token not revoked`);
+                            }
                         }
-                        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
-                            console.log(`[PUBLIC-AUTH-${requestId}] ✅ Token not revoked`);
+                        catch (redisError) {
+                            // Log the error but don't block authentication - degraded mode
+                            console.error(`[PUBLIC-AUTH-${requestId}] ⚠️  Redis/ElastiCache error during revocation check:`, redisError);
+                            console.log(`[PUBLIC-AUTH-${requestId}] 🔄 Continuing in degraded mode without revocation check`);
                         }
                     }
                     else {
@@ -171,43 +178,22 @@ class PublicAuthMiddleware {
         if (config.redis) {
             try {
                 const redisConfig = config.redis;
-                // Check if cluster configuration is provided
-                if (redisConfig.cluster) {
-                    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
-                        console.log('🍍 [PUBLIC-AUTH] Initializing Redis Cluster connection');
-                    }
-                    const clusterOptions = this.getRedisClusterOptions(redisConfig);
-                    if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
-                        console.log('🍍 [PUBLIC-AUTH] Connecting to Redis Cluster with', clusterOptions.rootNodes?.length || 0, 'root nodes');
-                    }
-                    this.redisClient = (0, redis_1.createCluster)(clusterOptions);
-                    this.redisClient.connect()
-                        .then(() => {
-                        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
-                            console.log('🍍 [PUBLIC-AUTH] ✅ Redis Cluster connected successfully');
-                        }
-                    })
-                        .catch((error) => {
-                        console.error('🍍 [PUBLIC-AUTH] ❌ Redis Cluster connection failed:', error);
-                    });
+                if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
+                    console.log('🍍 [PUBLIC-AUTH] Initializing resilient Redis/ElastiCache connection');
                 }
-                else {
-                    // Standard single Redis instance
-                    const redisOptions = this.getRedisOptions(config.redis);
+                // Use the connection manager for resilient connections
+                this.redisManager = new redis_connection_manager_1.ElastiCacheConnectionManager(redisConfig);
+                // Initialize connection in the background
+                this.redisManager.connect()
+                    .then(() => {
                     if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
-                        console.log('🍍 [PUBLIC-AUTH] Connecting to Redis:', this.maskCredentials(redisOptions.url || redisOptions.socket?.host || 'unknown'));
+                        console.log('🍍 [PUBLIC-AUTH] ✅ Redis/ElastiCache connected successfully with automatic reconnection');
                     }
-                    this.redisClient = (0, redis_1.createClient)(redisOptions);
-                    this.redisClient.connect()
-                        .then(() => {
-                        if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
-                            console.log('🍍 [PUBLIC-AUTH] ✅ Redis connected successfully');
-                        }
-                    })
-                        .catch((error) => {
-                        console.error('🍍 [PUBLIC-AUTH] ❌ Redis connection failed:', error);
-                    });
-                }
+                })
+                    .catch((error) => {
+                    console.error('🍍 [PUBLIC-AUTH] ❌ Initial Redis/ElastiCache connection failed:', error);
+                    console.log('🍍 [PUBLIC-AUTH] ⚠️  Connection will be retried automatically when needed');
+                });
             }
             catch (error) {
                 console.error('🍍 [PUBLIC-AUTH] ❌ Redis configuration error:', error.message);

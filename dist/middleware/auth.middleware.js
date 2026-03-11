@@ -1,37 +1,4 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -39,8 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PineappleAuth = void 0;
 exports.createAuthMiddleware = createAuthMiddleware;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const Redis = __importStar(require("redis"));
 const config_helpers_1 = require("../utils/config-helpers");
+const redis_connection_manager_1 = require("../utils/redis-connection-manager");
 class PineappleAuth {
     constructor(config) {
         /**
@@ -86,17 +53,24 @@ class PineappleAuth {
                     console.log(`[JWT-AUTH-${requestId}] 🎯 Token ID: ${decoded.jti}`);
                     console.log(`[JWT-AUTH-${requestId}] ⏰ Expires: ${decoded.exp ? new Date(decoded.exp * 1000).toISOString() : 'never'}`);
                     // Check if token is revoked (if Redis is available)
-                    if (this.redisClient) {
-                        console.log(`[JWT-AUTH-${requestId}] 🔄 Checking token revocation in Redis`);
-                        const isRevoked = await this.redisClient.get(`revoked:${decoded.jti}`);
-                        if (isRevoked) {
-                            console.log(`[JWT-AUTH-${requestId}] ❌ Token is revoked`);
-                            return res.status(403).json({
-                                success: false,
-                                error: { message: 'Token has been revoked' }
-                            });
+                    if (this.redisManager) {
+                        console.log(`[JWT-AUTH-${requestId}] 🔄 Checking token revocation in Redis/ElastiCache`);
+                        try {
+                            const isRevoked = await this.redisManager.get(`revoked:${decoded.jti}`);
+                            if (isRevoked) {
+                                console.log(`[JWT-AUTH-${requestId}] ❌ Token is revoked`);
+                                return res.status(403).json({
+                                    success: false,
+                                    error: { message: 'Token has been revoked' }
+                                });
+                            }
+                            console.log(`[JWT-AUTH-${requestId}] ✅ Token not revoked`);
                         }
-                        console.log(`[JWT-AUTH-${requestId}] ✅ Token not revoked`);
+                        catch (redisError) {
+                            // Log the error but don't block authentication - degraded mode
+                            console.error(`[JWT-AUTH-${requestId}] ⚠️  Redis/ElastiCache error during revocation check:`, redisError);
+                            console.log(`[JWT-AUTH-${requestId}] 🔄 Continuing in degraded mode without revocation check`);
+                        }
                     }
                     else {
                         console.log(`[JWT-AUTH-${requestId}] ⚠️  Redis not configured - skipping revocation check`);
@@ -181,19 +155,26 @@ class PineappleAuth {
                     });
                 }
                 // Check nonce hasn't been used (if Redis available)
-                if (this.redisClient) {
-                    console.log(`[SERVICE-AUTH-${requestId}] 🔄 Checking nonce replay in Redis`);
-                    const nonceUsed = await this.redisClient.get(`nonce:${nonce}`);
-                    if (nonceUsed) {
-                        console.log(`[SERVICE-AUTH-${requestId}] ❌ Nonce already used - replay attack detected`);
-                        return res.status(403).json({
-                            success: false,
-                            error: { message: 'Request nonce already used' }
-                        });
+                if (this.redisManager) {
+                    console.log(`[SERVICE-AUTH-${requestId}] 🔄 Checking nonce replay in Redis/ElastiCache`);
+                    try {
+                        const nonceUsed = await this.redisManager.get(`nonce:${nonce}`);
+                        if (nonceUsed) {
+                            console.log(`[SERVICE-AUTH-${requestId}] ❌ Nonce already used - replay attack detected`);
+                            return res.status(403).json({
+                                success: false,
+                                error: { message: 'Request nonce already used' }
+                            });
+                        }
+                        // Store nonce for 5 minutes
+                        await this.redisManager.setEx(`nonce:${nonce}`, 300, 'used');
+                        console.log(`[SERVICE-AUTH-${requestId}] ✅ Nonce stored for replay protection`);
                     }
-                    // Store nonce for 5 minutes
-                    await this.redisClient.setEx(`nonce:${nonce}`, 300, 'used');
-                    console.log(`[SERVICE-AUTH-${requestId}] ✅ Nonce stored for replay protection`);
+                    catch (redisError) {
+                        // Log the error but don't block authentication - degraded mode
+                        console.error(`[SERVICE-AUTH-${requestId}] ⚠️  Redis/ElastiCache error during nonce check:`, redisError);
+                        console.log(`[SERVICE-AUTH-${requestId}] 🔄 Continuing in degraded mode without nonce replay check`);
+                    }
                 }
                 else {
                     console.log(`[SERVICE-AUTH-${requestId}] ⚠️  Redis not configured - skipping nonce replay check`);
@@ -253,29 +234,18 @@ class PineappleAuth {
         if (config.redis) {
             try {
                 const redisConfig = config.redis;
-                // Check if cluster configuration is provided
-                if (redisConfig.cluster) {
-                    console.log('🍍 [PINEAPPLE-AUTH] Initializing Redis Cluster connection');
-                    const clusterOptions = this.getRedisClusterOptions(redisConfig);
-                    console.log('🍍 [PINEAPPLE-AUTH] Connecting to Redis Cluster with', clusterOptions.rootNodes?.length || 0, 'root nodes');
-                    this.redisClient = Redis.createCluster(clusterOptions);
-                    this.redisClient.connect()
-                        .then(() => console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis Cluster connected successfully'))
-                        .catch((error) => {
-                        console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis Cluster connection failed:', error);
-                    });
-                }
-                else {
-                    // Standard single Redis instance
-                    const redisOptions = this.getRedisOptions(config.redis);
-                    console.log('🍍 [PINEAPPLE-AUTH] Connecting to Redis:', this.maskCredentials(redisOptions.url || redisOptions.socket?.host || 'unknown'));
-                    this.redisClient = Redis.createClient(redisOptions);
-                    this.redisClient.connect()
-                        .then(() => console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis connected successfully'))
-                        .catch((error) => {
-                        console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis connection failed:', error);
-                    });
-                }
+                console.log('🍍 [PINEAPPLE-AUTH] Initializing resilient Redis/ElastiCache connection');
+                // Use the connection manager for resilient connections
+                this.redisManager = new redis_connection_manager_1.ElastiCacheConnectionManager(redisConfig);
+                // Initialize connection in the background
+                this.redisManager.connect()
+                    .then(() => {
+                    console.log('🍍 [PINEAPPLE-AUTH] ✅ Redis/ElastiCache connected successfully with automatic reconnection');
+                })
+                    .catch((error) => {
+                    console.error('🍍 [PINEAPPLE-AUTH] ❌ Initial Redis/ElastiCache connection failed:', error);
+                    console.log('🍍 [PINEAPPLE-AUTH] ⚠️  Connection will be retried automatically when needed');
+                });
             }
             catch (error) {
                 console.error('🍍 [PINEAPPLE-AUTH] ❌ Redis configuration error:', error.message);
@@ -287,10 +257,10 @@ class PineappleAuth {
      * Revoke JWT token (requires Redis)
      */
     async revokeToken(tokenId, expirySeconds = 86400) {
-        if (!this.redisClient) {
+        if (!this.redisManager) {
             throw new Error('Redis not configured for token revocation');
         }
-        await this.redisClient.setEx(`revoked:${tokenId}`, expirySeconds, 'true');
+        await this.redisManager.setEx(`revoked:${tokenId}`, expirySeconds, 'true');
     }
     extractServiceFromAuth(authHeader) {
         // Extract service name from AWS4 signature format
