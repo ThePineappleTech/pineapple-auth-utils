@@ -14,7 +14,7 @@ class PineappleAuth {
          * Middleware for JWT authentication (frontend -> service)
          */
         this.validateJWT = async (req, res, next) => {
-            const requestId = Math.random().toString(36).substr(2, 9);
+            const requestId = Date.now().toString() + Math.floor(Math.random() * 1000);
             console.log(`[JWT-AUTH-${requestId}] 🔐 Starting JWT validation for ${req.method} ${req.path}`);
             try {
                 // Allow OPTIONS requests
@@ -114,7 +114,7 @@ class PineappleAuth {
          * Middleware for AWS SigV4 authentication (service -> service)
          */
         this.validateServiceAuth = async (req, res, next) => {
-            const requestId = Math.random().toString(36).substr(2, 9);
+            const requestId = Date.now().toString() + Math.floor(Math.random() * 1000);
             console.log(`[SERVICE-AUTH-${requestId}] 🔧 Starting service auth validation for ${req.method} ${req.path}`);
             try {
                 // Allow OPTIONS requests
