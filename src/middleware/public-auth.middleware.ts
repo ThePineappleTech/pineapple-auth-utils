@@ -85,7 +85,7 @@ export class PublicAuthMiddleware {
    * Supports both HttpOnly cookies and Authorization header
    */
   validateJWT = async (req: Request, res: Response, next: NextFunction) => {
-    const requestId = Math.random().toString(36).substr(2, 9);
+    const requestId = Date.now().toString() + Math.floor(Math.random() * 1000);
     if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
       console.log(`[PUBLIC-AUTH-${requestId}] 🔐 Starting JWT validation for ${req.method} ${req.path}`);
     }
