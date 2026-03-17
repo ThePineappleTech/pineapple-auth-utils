@@ -1,6 +1,6 @@
 {
   "name": "@ThePineappleTech/pineapple-auth-utils",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "description": "Pineapple authentication utilities for microservices",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
